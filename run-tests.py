@@ -1,50 +1,18 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import subprocess
-from subprocess import Popen
+from subprocess import Popen, call
 import os
 from os import listdir, path
 from os.path import isfile, join
 import sys
 import re
 import time
-try:
-    from shutil import which
-except ImportError:
+import random
+from shutil import which
 
-    def which(cmd):
-        path = os.getenv('PATH')
-        for p in path.split(os.path.pathsep):
-            p = os.path.join(p, cmd)
-            if os.path.exists(p) and os.access(p, os.X_OK):
-                return p
+here = os.path.abspath(os.path.dirname(__file__))
 
-
-if not hasattr(subprocess, 'run'):
-    subprocess.run = subprocess.call
-
-if not hasattr(Popen, '__enter__'):
-
-    def backported_enter(self):
-        return self
-
-    def backported_exit(self, type, value, traceback):
-        if self.stdout:
-            self.stdout.close()
-        if self.stderr:
-            self.stderr.close()
-        try:  # Flushing a BufferedWriter may raise an error
-            if self.stdin:
-                self.stdin.close()
-        finally:
-            # Wait for the process to terminate, to avoid zombies.
-            return
-            self.wait()
-
-    Popen.__enter__ = backported_enter
-    Popen.__exit__ = backported_exit
-
-PYTEST = 'pytest'
 XVFB = 'Xvfb'
 I3_BINARY = 'i3'
 SOCKETDIR = '/tmp/.X11-unix'
@@ -60,11 +28,6 @@ def check_dependencies():
     if not which(I3_BINARY):
         print('i3 binary is required to run tests')
         print('Command "%s" not found in PATH' % I3_BINARY)
-        sys.exit(127)
-
-    if not which(PYTEST):
-        print('pytest is required to run tests')
-        print('Command %s not found in PATH' % PYTEST)
         sys.exit(127)
 
 
@@ -106,20 +69,33 @@ def start_server(display):
 
 
 def run_pytest(display):
+    version_info = sys.version_info
+
+    if version_info[0] < 3:
+        raise NotImplementedError('tests are not implemented for python < 3')
+
+    cmd = ['python3', '-m', 'pytest', '-s']
+
+    if version_info[1] < 6:
+        cmd += ['--ignore', 'test/aio']
+
     env = os.environ.copy()
     env['DISPLAY'] = ':%d' % display
-    env['PYTHONPATH'] = './i3ipc'
-    env['_I3IPC_TEST'] = '1'
-    subprocess.run([PYTEST], env=env)
+    env['PYTHONPATH'] = here
+    env['I3SOCK'] = '/tmp/i3ipc-test-sock-{display}'.format(display=display)
+    return subprocess.run(cmd + sys.argv[1:], env=env)
 
 
 def main():
     check_dependencies()
+    call([I3_BINARY, '--version'])
     display = get_open_display()
 
     with start_server(display) as server:
-        run_pytest(display)
+        result = run_pytest(display)
         server.terminate()
+
+    sys.exit(result.returncode)
 
 
 if __name__ == '__main__':
